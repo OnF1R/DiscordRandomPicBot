@@ -4,12 +4,11 @@ using Discord.Net;
 using Discord.WebSocket;
 using Microsoft.Extensions.DependencyInjection;
 using Newtonsoft.Json;
-using System.Net;
-using System;
 using System.Reflection;
-using System.Threading.Channels;
-using System.Xml.Linq;
-using System.Reflection.Metadata;
+using System.Text;
+using System.Runtime.InteropServices;
+
+using  GoogleHelper;
 
 
 namespace DiscordRandomPicBot
@@ -19,9 +18,11 @@ namespace DiscordRandomPicBot
         private DiscordSocketClient _client;
         private CommandService _commands;
         private IServiceProvider _services;
+        private DriveHelper _driveHelper;
         const ulong _guildId = 848289290295443456;
         const ulong _targetChannelId = 1190739342554042419;
         const ulong _nsfwChannelId = 1192445188401008701;
+        const ulong _picturesChannelId = 1121286759997775932;
 
         static void Main() => new Program().RunBotAsync().GetAwaiter().GetResult();
         public async Task RunBotAsync()
@@ -47,7 +48,26 @@ namespace DiscordRandomPicBot
 
             _client.Ready += ClientReady;
 
-            await _client.LoginAsync(TokenType.Bot, "MTE5MDc3MDkwMDYzMTU3MjQ4MA.G4nLbp.RIZ7E0pkbuzRd9r2KmG_qmd-wbx1y0c45jGLkw");
+            string discordKey = "";
+
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            {
+                //TODO
+            }
+            else
+            {
+                //TODO Change
+                using (FileStream fStream = new FileStream("C:\\Users\\Oleg\\source\\repos\\DiscordRandomPicBot\\discordKey.txt", FileMode.Open, FileAccess.Read))
+                {
+                    byte[] buffer = new byte[fStream.Length];
+                    await fStream.ReadAsync(buffer);
+                    discordKey = Encoding.Default.GetString(buffer);
+                }
+            }
+
+            
+
+            await _client.LoginAsync(TokenType.Bot, discordKey);
 
             await _client.StartAsync();
 
@@ -60,6 +80,100 @@ namespace DiscordRandomPicBot
 
             await _commands.AddModulesAsync(Assembly.GetEntryAssembly(), _services);
         }
+
+        public async Task RunPeriodicallyAsync(
+    Func<Task> func,
+    TimeSpan interval,
+    CancellationToken cancellationToken)
+{
+    while (!cancellationToken.IsCancellationRequested)
+    {
+        await Task.Delay(interval, cancellationToken);
+        await func();
+        await Console.Out.WriteLineAsync("Timer triggered");
+    }
+}
+
+public async Task RegisterTimerMessagingAsync()
+{
+    //int delayInMilliseconds = new Random().Next(420000, 900000);
+
+    //int delayInMilliseconds = 3600000;
+
+    TimeSpan delay = TimeSpan.FromHours(1);
+
+    bool isFirstRun = true;
+
+    var targetChannel = _client.GetChannel(_picturesChannelId) as IMessageChannel;
+
+    while (true)
+    {
+        if (isFirstRun)
+        {
+            await SendRandomFileFromGoogleDrive();
+            isFirstRun = false;
+        }
+        else
+        {
+            await RunPeriodicallyAsync(SendRandomFileFromGoogleDrive, delay, CancellationToken.None);
+        }
+    }
+}
+
+public async Task SendRandomFileFromGoogleDrive()
+{
+    using var client = new HttpClient();
+
+    var file = await GetRandomFileFromGoogleDrive();
+
+    var fileBytes = await client.GetByteArrayAsync(file.WebContentLink);
+
+    using var stream = new MemoryStream(fileBytes);
+
+    var targetChannel = _client.GetChannel(_picturesChannelId) as IMessageChannel;
+
+    await targetChannel!.SendFileAsync(stream, file.Name, $"От {await _driveHelper.GetFileNameByID(file.Parents.First())}\n{file.Name}");
+}
+
+public async Task<Google.Apis.Drive.v3.Data.File> GetRandomFileFromGoogleDrive()
+{
+    var file = await _driveHelper.GetRandomFile(Folder.Pictures);
+
+    string pathToTxt;
+
+    if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+    {
+        pathToTxt = Path.Combine("discord-bot", "uniqueID.txt");
+    }
+    else
+    {
+        var path = Directory.GetCurrentDirectory();
+
+        pathToTxt = Path.Combine(path, "uniqueID.txt");
+    }
+
+    
+
+    using (StreamReader streamReader = new StreamReader(pathToTxt, Encoding.Default))
+    {
+        string? line;
+
+        while ((line = streamReader.ReadLine()) != null)
+        {
+            if (line == file.Id)
+            {
+                return await GetRandomFileFromGoogleDrive();
+            }
+        }
+    }
+
+    using (StreamWriter streamWriter = new StreamWriter(pathToTxt, true, Encoding.Default))
+    {
+        streamWriter.WriteLine(file.Id);
+    }
+
+    return file;
+}
 
         public async Task HandleCommandAsync(SocketMessage arg)
         {
@@ -505,3 +619,4 @@ namespace DiscordRandomPicBot
         }
     }
 }
+
